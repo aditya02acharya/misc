@@ -1,4 +1,5 @@
 """POST /v1/sync, GET /v1/sync/{job_id}"""
+import asyncio
 import logging
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -32,7 +33,31 @@ async def trigger_sync(request: SyncRequest = SyncRequest()):
         redis_client=redis,
         embed_batch_fn=_embed_batch,
     )
+
+    # Schedule tool_list_changed notification after sync completes
+    asyncio.create_task(_notify_tool_list_changed(job_id, redis))
+
     return {"job_id": job_id, "status": status}
+
+
+async def _notify_tool_list_changed(job_id: str, redis_client) -> None:
+    """Wait for sync to complete, then notify MCP clients that tool list changed."""
+    try:
+        for _ in range(120):  # wait up to 120s
+            job = await get_sync_job_status(job_id, redis_client)
+            if job and job.status in ("completed", "failed"):
+                break
+            await asyncio.sleep(1)
+
+        if job and job.status == "completed":
+            from mcp_tool_manager.main import mcp
+            try:
+                await mcp.send_tool_list_changed()
+                logger.info("Sent tool_list_changed notification after sync %s", job_id)
+            except Exception as exc:
+                logger.debug("Could not send tool_list_changed: %s", exc)
+    except Exception as exc:
+        logger.debug("tool_list_changed notification task failed: %s", exc)
 
 
 @router.get("/sync/{job_id}")

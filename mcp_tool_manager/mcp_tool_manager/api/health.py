@@ -1,6 +1,5 @@
-"""GET /v1/health"""
+"""GET /v1/health, GET /v1/ready"""
 import logging
-from datetime import datetime
 
 from fastapi import APIRouter
 
@@ -69,3 +68,15 @@ async def health_check():
         "tool_count": tool_count,
         "last_sync": last_sync,
     }
+
+
+@router.get("/ready")
+async def readiness_check():
+    """Lightweight readiness probe — checks only Redis connectivity."""
+    try:
+        redis = get_redis()
+        await redis.ping()
+        return {"status": "ready"}
+    except Exception as exc:
+        logger.warning("Readiness check failed: %s", exc)
+        return {"status": "not_ready", "error": str(exc)}

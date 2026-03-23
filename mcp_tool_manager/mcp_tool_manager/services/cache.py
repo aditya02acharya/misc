@@ -5,6 +5,8 @@ import logging
 import time
 from typing import Any
 
+from mcp_tool_manager.telemetry import record_counter, record_gauge, record_histogram
+
 logger = logging.getLogger(__name__)
 
 
@@ -85,6 +87,7 @@ async def write_cache_chunks(
         pipe.expire(key, settings.cache.ttl)
 
     await pipe.execute()
+    record_counter("mcp.cache.writes", value=len(chunks))
     return len(chunks)
 
 
@@ -100,6 +103,7 @@ async def cache_writer_task(queue: asyncio.Queue, settings: Any) -> None:
 
     while True:
         try:
+            record_gauge("mcp.cache.queue_depth", float(queue.qsize()))
             item = await queue.get()
             session_id, tool_call_id, tool_id, arguments, raw_result = item
 
@@ -110,6 +114,7 @@ async def cache_writer_task(queue: asyncio.Queue, settings: Any) -> None:
                 return await embed_batch(texts, settings, http_client)
 
             try:
+                write_start = time.monotonic()
                 count = await write_cache_chunks(
                     session_id=session_id,
                     tool_call_id=tool_call_id,
@@ -120,6 +125,7 @@ async def cache_writer_task(queue: asyncio.Queue, settings: Any) -> None:
                     settings=settings,
                     embed_batch_fn=_embed_batch,
                 )
+                record_histogram("mcp.cache.write_latency_ms", (time.monotonic() - write_start) * 1000)
                 logger.debug("Cached %d chunks for %s", count, tool_call_id)
             except Exception as exc:
                 logger.error("Cache write failed for %s: %s", tool_call_id, exc)

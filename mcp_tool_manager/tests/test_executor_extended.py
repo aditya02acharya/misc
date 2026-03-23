@@ -39,12 +39,11 @@ async def test_get_server_endpoint_fallback(fakeredis_client):
 # ── call_downstream_tool ─────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_call_downstream_tool_with_progress(fakeredis_client):
-    settings = make_settings()
-    progress_calls = []
+async def test_call_downstream_tool_with_ctx(fakeredis_client):
+    import mcp_tool_manager.services.executor as ex
+    ex._session_pool.clear()
 
-    async def track_progress(current, total, msg):
-        progress_calls.append((current, msg))
+    settings = make_settings()
 
     mock_result = MagicMock()
     mock_session = AsyncMock()
@@ -57,6 +56,8 @@ async def test_call_downstream_tool_with_progress(fakeredis_client):
     mock_transport.__aenter__ = AsyncMock(return_value=(AsyncMock(), AsyncMock(), None))
     mock_transport.__aexit__ = AsyncMock(return_value=False)
 
+    mock_ctx = MagicMock()
+
     with patch("mcp.client.streamable_http.streamablehttp_client", return_value=mock_transport), \
          patch("mcp.ClientSession", return_value=mock_session):
 
@@ -66,17 +67,18 @@ async def test_call_downstream_tool_with_progress(fakeredis_client):
             arguments={"query": "python"},
             redis_client=fakeredis_client,
             settings=settings,
-            progress_callback=track_progress,
+            ctx=mock_ctx,
         )
 
     assert result is mock_result
-    assert len(progress_calls) == 2
-    assert progress_calls[0][0] == 0.1
-    assert progress_calls[1][0] == 0.5
+    ex._session_pool.clear()
 
 
 @pytest.mark.asyncio
 async def test_call_downstream_tool_raises_on_failure(fakeredis_client):
+    import mcp_tool_manager.services.executor as ex
+    ex._session_pool.clear()
+
     settings = make_settings()
 
     mock_transport = AsyncMock()
@@ -92,11 +94,12 @@ async def test_call_downstream_tool_raises_on_failure(fakeredis_client):
                 redis_client=fakeredis_client,
                 settings=settings,
             )
+    ex._session_pool.clear()
 
 
 @pytest.mark.asyncio
-async def test_call_tool_with_validation_progress_callback(fakeredis_client):
-    """progress_callback is passed through to call_downstream_tool."""
+async def test_call_tool_with_validation_ctx_forwarded(fakeredis_client):
+    """ctx is passed through to call_downstream_tool."""
     import json as _json
     schema = {"type": "object", "properties": {"q": {"type": "string"}}}
     await fakeredis_client.hset(
@@ -104,10 +107,7 @@ async def test_call_tool_with_validation_progress_callback(fakeredis_client):
         mapping={"tool_id": "svc:tool", "input_schema": _json.dumps(schema), "name": "tool"},
     )
 
-    progress_calls = []
-
-    async def track(c, t, m):
-        progress_calls.append(m)
+    mock_ctx = MagicMock()
 
     with patch(
         "mcp_tool_manager.services.executor.call_downstream_tool",
@@ -120,12 +120,12 @@ async def test_call_tool_with_validation_progress_callback(fakeredis_client):
             arguments={"q": "hello"},
             redis_client=fakeredis_client,
             settings=Settings(),
-            progress_callback=track,
+            ctx=mock_ctx,
         )
 
-    # progress_callback was forwarded
+    # ctx was forwarded
     _, kwargs = mock_call.call_args
-    assert kwargs.get("progress_callback") is track
+    assert kwargs.get("ctx") is mock_ctx
 
 
 @pytest.mark.asyncio
@@ -164,12 +164,14 @@ async def test_close_all_sessions_empty():
 async def test_close_all_sessions_with_entries():
     import mcp_tool_manager.services.executor as ex
     mock_session = AsyncMock()
-    mock_session.close = AsyncMock()
-    ex._session_pool = {"github": mock_session}
+    mock_session.__aexit__ = AsyncMock(return_value=False)
+    mock_transport = AsyncMock()
+    mock_transport.__aexit__ = AsyncMock(return_value=False)
+    ex._session_pool = {"github": (mock_session, mock_transport)}
 
     await close_all_sessions()
 
-    mock_session.close.assert_called_once()
+    mock_session.__aexit__.assert_called_once()
     assert ex._session_pool == {}
 
 
@@ -177,8 +179,10 @@ async def test_close_all_sessions_with_entries():
 async def test_close_all_sessions_ignores_close_errors():
     import mcp_tool_manager.services.executor as ex
     mock_session = AsyncMock()
-    mock_session.close = AsyncMock(side_effect=Exception("close failed"))
-    ex._session_pool = {"broken": mock_session}
+    mock_session.__aexit__ = AsyncMock(side_effect=Exception("close failed"))
+    mock_transport = AsyncMock()
+    mock_transport.__aexit__ = AsyncMock(side_effect=Exception("close failed"))
+    ex._session_pool = {"broken": (mock_session, mock_transport)}
 
     await close_all_sessions()  # Should not raise
     assert ex._session_pool == {}

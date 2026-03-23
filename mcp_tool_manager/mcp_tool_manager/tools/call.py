@@ -3,6 +3,7 @@ import logging
 import time
 import uuid
 
+from fastmcp import Context
 from openinference.semconv.trace import SpanAttributes
 
 from mcp_tool_manager.config import get_settings
@@ -21,6 +22,7 @@ async def call_tool(
     session_id: str,
     tool_id: str,
     arguments: dict,
+    ctx: Context | None = None,
 ) -> dict:
     """
     Execute a discovered tool. Provide session_id to accumulate context across calls.
@@ -44,17 +46,27 @@ async def call_tool(
         server_name = tool_id.split(":", 1)[0]
 
         try:
+            if ctx:
+                await ctx.report_progress(0.1, 1.0, "Connecting to server...")
+
             # Validate + execute
             tool_name, raw_result = await call_tool_with_validation(
                 tool_id=tool_id,
                 arguments=arguments,
                 redis_client=redis,
                 settings=settings,
+                ctx=ctx,
             )
+
+            if ctx:
+                await ctx.report_progress(0.5, 1.0, "Processing results...")
 
             result_text = result_to_text(raw_result)
 
             # Summarise via Bedrock
+            if ctx:
+                await ctx.report_progress(0.8, 1.0, "Summarising results...")
+
             summary_start = time.monotonic()
             summary, gaps = await summarise_tool_result(
                 tool_name=tool_name,
@@ -79,6 +91,9 @@ async def call_tool(
             record_histogram("mcp.tool_calls.latency_ms", elapsed_ms, attributes={"server": server_name})
 
             span.set_attribute(SpanAttributes.OUTPUT_VALUE, summary)
+
+            if ctx:
+                await ctx.report_progress(1.0, 1.0, "Done")
 
             return {
                 "tool_call_id": tool_call_id,

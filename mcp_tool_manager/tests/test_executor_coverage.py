@@ -55,14 +55,13 @@ async def test_get_server_endpoint_string_endpoint_mock():
 
 @pytest.mark.asyncio
 async def test_call_downstream_tool_success_mock():
-    """Covers lines 39-54: happy path with progress callbacks."""
+    """Covers happy path with pooled session."""
+    import mcp_tool_manager.services.executor as ex
+    # Clear pool before test
+    ex._session_pool.clear()
+
     mock_redis = AsyncMock()
     mock_redis.hget = AsyncMock(return_value=None)
-
-    progress_calls = []
-
-    async def track(current, total, msg):
-        progress_calls.append((current, msg))
 
     mock_result = MagicMock()
     mock_session = AsyncMock()
@@ -83,18 +82,19 @@ async def test_call_downstream_tool_success_mock():
             arguments={"query": "python"},
             redis_client=mock_redis,
             settings=make_settings(),
-            progress_callback=track,
         )
 
     assert result is mock_result
-    assert len(progress_calls) == 2
-    assert progress_calls[0][0] == 0.1
-    assert progress_calls[1][0] == 0.5
+    # Clean up pool
+    ex._session_pool.clear()
 
 
 @pytest.mark.asyncio
-async def test_call_downstream_tool_no_progress_mock():
-    """Covers lines 42-54 without progress callback branch."""
+async def test_call_downstream_tool_no_ctx_mock():
+    """Covers call without ctx parameter."""
+    import mcp_tool_manager.services.executor as ex
+    ex._session_pool.clear()
+
     mock_redis = AsyncMock()
     mock_redis.hget = AsyncMock(return_value=b"http://server:8080")
 
@@ -117,15 +117,19 @@ async def test_call_downstream_tool_no_progress_mock():
             arguments={"query": "python"},
             redis_client=mock_redis,
             settings=make_settings(),
-            progress_callback=None,
+            ctx=None,
         )
 
     assert result is mock_result
+    ex._session_pool.clear()
 
 
 @pytest.mark.asyncio
 async def test_call_downstream_tool_exception_mock():
-    """Covers lines 56-60: exception path re-raises."""
+    """Covers exception path re-raises."""
+    import mcp_tool_manager.services.executor as ex
+    ex._session_pool.clear()
+
     mock_redis = AsyncMock()
     mock_redis.hget = AsyncMock(return_value=None)
 
@@ -142,6 +146,7 @@ async def test_call_downstream_tool_exception_mock():
                 redis_client=mock_redis,
                 settings=make_settings(),
             )
+    ex._session_pool.clear()
 
 
 # ── call_tool_with_validation ─────────────────────────────────────────
@@ -149,7 +154,7 @@ async def test_call_downstream_tool_exception_mock():
 
 @pytest.mark.asyncio
 async def test_call_tool_not_found_mock():
-    """Covers lines 82-83: tool not found raises ValueError."""
+    """Covers tool not found raises ValueError."""
     mock_redis = AsyncMock()
     mock_redis.hgetall = AsyncMock(return_value={})
 
@@ -164,7 +169,7 @@ async def test_call_tool_not_found_mock():
 
 @pytest.mark.asyncio
 async def test_call_tool_valid_with_schema_mock():
-    """Covers lines 86-107: schema validation + downstream call."""
+    """Covers schema validation + downstream call."""
     mock_redis = AsyncMock()
     schema = {"type": "object", "properties": {"q": {"type": "string"}}}
     mock_redis.hgetall = AsyncMock(return_value={
@@ -195,7 +200,7 @@ async def test_call_tool_valid_with_schema_mock():
 
 @pytest.mark.asyncio
 async def test_call_tool_schema_validation_error_mock():
-    """Covers lines 94-95: jsonschema validation error."""
+    """Covers jsonschema validation error."""
     mock_redis = AsyncMock()
     schema = {
         "type": "object",
@@ -219,7 +224,7 @@ async def test_call_tool_schema_validation_error_mock():
 
 @pytest.mark.asyncio
 async def test_call_tool_no_schema_mock():
-    """Covers lines 87+ with no input_schema stored."""
+    """Covers no input_schema stored."""
     mock_redis = AsyncMock()
     mock_redis.hgetall = AsyncMock(return_value={
         b"tool_id": b"svc:tool",
@@ -246,8 +251,8 @@ async def test_call_tool_no_schema_mock():
 
 
 @pytest.mark.asyncio
-async def test_call_tool_with_progress_mock():
-    """Covers line 106: progress_callback forwarded to call_downstream_tool."""
+async def test_call_tool_with_ctx_mock():
+    """Covers ctx forwarded to call_downstream_tool."""
     mock_redis = AsyncMock()
     mock_redis.hgetall = AsyncMock(return_value={
         b"tool_id": b"svc:tool",
@@ -256,10 +261,7 @@ async def test_call_tool_with_progress_mock():
     })
     mock_redis.hget = AsyncMock(return_value=None)
 
-    progress_calls = []
-
-    async def track(c, t, m):
-        progress_calls.append(m)
+    mock_ctx = MagicMock()
 
     mock_result = MagicMock()
     mock_result.content = []
@@ -274,16 +276,16 @@ async def test_call_tool_with_progress_mock():
             arguments={},
             redis_client=mock_redis,
             settings=make_settings(),
-            progress_callback=track,
+            ctx=mock_ctx,
         )
 
     _, kwargs = mock_call.call_args
-    assert kwargs.get("progress_callback") is track
+    assert kwargs.get("ctx") is mock_ctx
 
 
 @pytest.mark.asyncio
 async def test_call_tool_json_decode_error_mock():
-    """Covers lines 96-97: malformed JSON schema is silently skipped."""
+    """Covers malformed JSON schema is silently skipped."""
     mock_redis = AsyncMock()
     mock_redis.hgetall = AsyncMock(return_value={
         b"tool_id": b"svc:tool",

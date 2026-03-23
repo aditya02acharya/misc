@@ -1,6 +1,10 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Literal
 from pydantic import BaseModel, Field
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 class ToolDoc(BaseModel):
@@ -14,8 +18,8 @@ class ToolDoc(BaseModel):
     searchable_text: str = ""
     content_hash: str = ""
     embedding: bytes = b""
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)
 
 
 class CacheChunk(BaseModel):
@@ -26,7 +30,7 @@ class CacheChunk(BaseModel):
     text: str
     embedding: bytes = b""
     arguments_json: str = "{}"
-    created_at: float = Field(default_factory=lambda: datetime.utcnow().timestamp())
+    created_at: float = Field(default_factory=lambda: datetime.now(timezone.utc).timestamp())
 
 
 class SyncResult(BaseModel):
@@ -42,7 +46,7 @@ class SyncResult(BaseModel):
 class SyncJobStatus(BaseModel):
     job_id: str
     status: Literal["running", "completed", "failed"]
-    started_at: datetime = Field(default_factory=datetime.utcnow)
+    started_at: datetime = Field(default_factory=_utcnow)
     completed_at: datetime | None = None
     stats: SyncResult | None = None
     error: str | None = None

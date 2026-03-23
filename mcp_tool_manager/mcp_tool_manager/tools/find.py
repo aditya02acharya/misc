@@ -2,6 +2,7 @@
 import logging
 import time
 
+from fastmcp import Context
 from openinference.semconv.trace import SpanAttributes
 
 from mcp_tool_manager.config import get_settings
@@ -18,6 +19,7 @@ async def find_tools(
     query: str,
     top_k: int = 10,
     server_filter: str | None = None,
+    ctx: Context | None = None,
 ) -> list[dict]:
     """
     Discover available tools. Describe WHAT you need to accomplish, not HOW.
@@ -31,6 +33,9 @@ async def find_tools(
 
     with tracer.start_as_current_span("find_tools") as span:
         span.set_attribute(SpanAttributes.INPUT_VALUE, query)
+
+        if ctx:
+            await ctx.report_progress(0.1, 1.0, "Searching tools...")
 
         settings = get_settings()
         results = await hybrid_search(
@@ -51,5 +56,8 @@ async def find_tools(
         elapsed_ms = (time.monotonic() - start) * 1000
         record_counter("mcp.search.count")
         record_histogram("mcp.search.latency_ms", elapsed_ms)
+
+        if ctx:
+            await ctx.report_progress(1.0, 1.0, f"Found {len(results)} tools")
 
         return output

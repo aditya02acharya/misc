@@ -5,7 +5,7 @@ import json
 import logging
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 import httpx
 
@@ -213,16 +213,25 @@ async def run_sync_job(
         stats.total_time_ms = (time.monotonic() - start) * 1000
 
         job.status = "completed"
-        job.completed_at = datetime.utcnow()
+        job.completed_at = datetime.now(timezone.utc)
         job.stats = stats
         await update_status(job)
+
+        # Record last successful sync timestamp
+        await redis_client.set("sync:last_completed", datetime.now(timezone.utc).isoformat())
+
+        # Update tools.total gauge
+        from mcp_tool_manager.telemetry import record_gauge, record_counter
+        record_gauge("mcp.tools.total", float(len(all_tools)))
+        record_counter("mcp.sync.runs")
+
         logger.info("Sync completed: %s", stats.model_dump())
 
     except Exception as exc:
         logger.exception("Sync job %s failed", job_id)
         job.status = "failed"
         job.error = str(exc)
-        job.completed_at = datetime.utcnow()
+        job.completed_at = datetime.now(timezone.utc)
         await update_status(job)
     finally:
         # Release lock

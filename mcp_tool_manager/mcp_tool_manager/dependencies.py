@@ -90,7 +90,7 @@ async def init_redis_indexes(settings) -> None:
     tool_schema = {
         "index": {
             "name": settings.redis.tool_index,
-            "prefix": "tool",
+            "prefix": "tool:",
             "storage_type": "hash",
         },
         "fields": [
@@ -118,7 +118,7 @@ async def init_redis_indexes(settings) -> None:
     cache_schema = {
         "index": {
             "name": settings.redis.cache_index,
-            "prefix": "cache",
+            "prefix": "cache:",
             "storage_type": "hash",
         },
         "fields": [

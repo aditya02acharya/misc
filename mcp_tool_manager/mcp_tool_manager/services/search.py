@@ -60,10 +60,11 @@ def _apply_substring_boost(results: list[dict], hints: list[str]) -> list[dict]:
         name = (item.get("name") or "").lower()
         server = (item.get("server_name") or "").lower()
         tags = (item.get("tags") or "").lower()
+        description = (item.get("description") or "").lower()
 
         for hint in hints:
             h = hint.lower()
-            if h in name or h in server or h in tags:
+            if h in name or h in server or h in tags or h in description:
                 score *= 2.0
 
         item = dict(item)
@@ -174,6 +175,14 @@ async def _execute_hybrid_query(
             boosted_terms = " ".join(f"({h})" for h in hints)
             bm25_query = f"{clean_query} {boosted_terms}".strip()
 
+        # Build combination kwargs based on method
+        combo_kwargs = {}
+        combination = getattr(settings.search, "combination", "RRF")
+        combo_kwargs["combination_method"] = combination
+        if combination == "LINEAR":
+            combo_kwargs["text_weight"] = settings.search.text_weight
+            combo_kwargs["vector_weight"] = settings.search.vector_weight
+
         hybrid_q = HybridQuery(
             text=bm25_query,
             text_field_name="searchable_text",
@@ -189,6 +198,7 @@ async def _execute_hybrid_query(
                 "score",
             ],
             num_results=top_k,
+            **combo_kwargs,
         )
 
         if hint_filter is not None:

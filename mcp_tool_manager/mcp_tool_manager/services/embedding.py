@@ -2,9 +2,12 @@
 import hashlib
 import logging
 import struct
+import time
 from typing import Any
 
 import httpx
+
+from mcp_tool_manager.telemetry import record_histogram
 
 logger = logging.getLogger(__name__)
 
@@ -79,10 +82,12 @@ async def _call_embedding_api(
     settings: Any,
     http_client: httpx.AsyncClient,
 ) -> list[float]:
+    start = time.monotonic()
     response = await http_client.post(
         settings.embedding.api_url,
         json={"model": settings.embedding.model, "input": [text]},
     )
     response.raise_for_status()
+    record_histogram("mcp.embedding.latency_ms", (time.monotonic() - start) * 1000)
     data = response.json()
     return data["data"][0]["embedding"]
